@@ -5,8 +5,9 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {console} from "@forge-std/console.sol";
+import {Math as OZMath} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {UD60x18} from "@prb/UD60x18.sol";
+import {console} from "forge-std/Test.sol";
 
 contract UniswapPair is ERC20, ReentrancyGuard {
     address public factory;
@@ -15,6 +16,11 @@ contract UniswapPair is ERC20, ReentrancyGuard {
 
     uint128 private _reserve0;
     uint128 private _reserve1;
+
+    uint256 public price0CumulativeLast;
+    uint256 public price1CumulativeLast;
+
+    uint32 private _blockTimestampLast;
 
     uint256 public constant MINIMUM_LIQUIDITY = 10 ** 3;
 
@@ -36,10 +42,20 @@ contract UniswapPair is ERC20, ReentrancyGuard {
         token1 = _token1;
     }
 
-    function _update(uint256 balance0, uint256 balance1) private {
+    function _update(uint256 balance0, uint256 balance1, uint128 __reserve0, uint128 __reserve1) private {
         require(balance0 <= type(uint128).max && balance1 <= type(uint128).max, "UniswapPair: OVERFLOW");
+
+        uint32 blockTimestamp = uint32(block.timestamp % 2 ** 32);
+        uint32 timeElapsed = blockTimestamp - _blockTimestampLast;
+
+        if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
+            price0CumulativeLast += UD60x18.unwrap(UD60x18.wrap(__reserve0).div(UD60x18.wrap(__reserve1))) * timeElapsed;
+            price1CumulativeLast += UD60x18.unwrap(UD60x18.wrap(__reserve1).div(UD60x18.wrap(__reserve0))) * timeElapsed;
+        }
+
         _reserve0 = uint128(balance0);
         _reserve1 = uint128(balance1);
+        _blockTimestampLast = blockTimestamp;
     }
 
     function mint(address to) external nonReentrant returns (uint256 liquidity) {
@@ -52,19 +68,20 @@ contract UniswapPair is ERC20, ReentrancyGuard {
         uint256 _totalSupply = totalSupply();
 
         if (_totalSupply == 0) {
-            liquidity = Math.sqrt(depositAmount0 * depositAmount1) - MINIMUM_LIQUIDITY;
+            liquidity = OZMath.sqrt(depositAmount0 * depositAmount1) - MINIMUM_LIQUIDITY;
             _mint(address(1), MINIMUM_LIQUIDITY);
         } else {
-            liquidity = Math.min(depositAmount0 * _totalSupply / __reserve0, depositAmount1 * _totalSupply / __reserve1);
+            liquidity =
+                OZMath.min(depositAmount0 * _totalSupply / __reserve0, depositAmount1 * _totalSupply / __reserve1);
         }
 
         require(liquidity > 0, "UniswapPair: INSUFFICIENT_LIQUIDITY_MINTED");
         _mint(to, liquidity);
-        _update(balance0, balance1);
+        _update(balance0, balance1, __reserve0, __reserve1);
     }
 
     function burn(address to) external nonReentrant returns (uint256 amount0, uint256 amount1) {
-        // (uint128 _reserve0, uint128 _reserve1) = getReserves();
+        (uint128 __reserve0, uint128 __reserve1) = getReserves();
         address _token0 = token0;
         address _token1 = token1;
         uint256 balance0 = IERC20(_token0).balanceOf(address(this));
@@ -81,7 +98,7 @@ contract UniswapPair is ERC20, ReentrancyGuard {
         balance0 = IERC20(_token0).balanceOf(address(this));
         balance1 = IERC20(_token1).balanceOf(address(this));
 
-        _update(balance0, balance1);
+        _update(balance0, balance1, __reserve0, __reserve1);
     }
 
     function swap(uint256 amount0Req, uint256 amount1Req, address to, bytes calldata data) external nonReentrant {
@@ -89,8 +106,6 @@ contract UniswapPair is ERC20, ReentrancyGuard {
         (uint128 __reserve0, uint128 __reserve1) = getReserves();
         require(amount0Req < __reserve0 && amount1Req < __reserve1, "UniswapPair: INSUFFICIENT_LIQUIDITY");
 
-        uint256 balance0;
-        uint256 balance1;
         if (amount0Req > 0) SafeERC20.safeTransfer(IERC20(token0), to, amount0Req);
         if (amount1Req > 0) SafeERC20.safeTransfer(IERC20(token1), to, amount1Req);
         // we need to implement the flash loan spec here. we need a flash loan receiver interface.
@@ -108,10 +123,9 @@ contract UniswapPair is ERC20, ReentrancyGuard {
         uint256 balance1LessFee = balance1 * 1000 - amount1Paid * 3;
         // invariant check. multiply product of reserves by 1000**2 because balances are each multiplied by 1000
         require(
-            balance0LessFee * balance1LessFee >= uint256(__reserve0) * uint256(__reserve1) * 1000 ** 2,
-            "UniswapPair: K_CONSTANT"
+            balance0LessFee * balance1LessFee >= uint256(__reserve0) * __reserve1 * 1000 ** 2, "UniswapPair: K_CONSTANT"
         );
 
-        _update(balance0, balance1);
+        _update(balance0, balance1, __reserve0, __reserve1);
     }
 }

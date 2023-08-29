@@ -7,7 +7,10 @@ interface IUniswapPair is IERC20 {
     function getTokens() external returns (address, address);
     function getReserves() external returns (uint256, uint256);
 
+    function price0CumulativeLast() external returns (uint256);
+    function price1CumulativeLast() external returns (uint256);
+
     function mint(address to) external returns (uint256 liquidity);
-    function swap(address to) external;
+    function swap(uint256 amount0Req, uint256 amount1Req, address to, bytes calldata data) external;
     function burn(address to) external returns (uint256, uint256);
 }

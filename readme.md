@@ -44,10 +44,8 @@ Corner cases to watch out for:
 - [ ] add flash loan capability (use EIP3156 not the way Uni does it)
 - [x] add 30 basis points LP fee
 - [x] add non-reentrancy guard
-- [ ] add cumulative price oracle stuff
-  - i understand this. basic price oracle stuff. i'm ok to lift it from uni.
-  - do i even need this?
-- [ ] add fee-switch logic
+- [ ] add cumulative price oracle stuff?
+- [ ] add fee-switch logic?
 
 ## Notes & Explanations
 
